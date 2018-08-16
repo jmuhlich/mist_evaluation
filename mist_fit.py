@@ -132,11 +132,6 @@ assert len(set(c.img.shape for c in ref_colonies)) == 1, \
 print("Loading stitched image")
 stitched_img = skimage.io.imread(stitched_img_path)
 
-# XXX reduce size for testing
-# ref_colonies = [c for c in ref_colonies if c.centroid[0] < -4000 and c.centroid[1] < -13000]
-# stitched_img = stitched_img[:10200, :10200]
-# XXX
-
 print("Segmenting stitched image")
 regions = segment(stitched_img, bg_threshold)
 comp_colonies = list(map(
@@ -153,14 +148,3 @@ costs = np.array(list(map_progress(
 pool.shutdown()
 
 comp_idxs, ref_idxs = scipy.optimize.linear_sum_assignment(costs)
-
-# For reduced dataset.
-# assert (
-#     np.vstack([comp_idxs, ref_idxs]).T ==
-#     [[ 0, 30], [ 1,  5], [ 2, 12], [ 3, 18], [ 4, 27], [ 5, 23], [ 6, 13],
-#      [ 7, 21], [ 8, 15], [ 9,  7], [10, 26], [11,  3], [12,  1], [13, 16],
-#      [14,  2], [15,  4], [16, 29], [17, 20], [18,  0], [19, 22], [20,  9],
-#      [21,  8], [22, 14], [23, 10], [24, 17], [25, 25], [26, 28], [27,  6],
-#      [28, 19], [29, 24], [30, 11]]
-# ).all()
-# print("OK!")
