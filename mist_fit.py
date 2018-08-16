@@ -39,7 +39,6 @@ def map_progress(pool, fn, *iterables):
     for i, result in enumerate(pool.map(fn, *iterables), 1):
         print(f"\r    {i}{total}", end="")
         yield result
-    print()
     t_end = time.perf_counter()
     print(f"    Elapsed: {t_end - t_start}")
 
@@ -120,7 +119,8 @@ bg_threshold = int(bg_threshold)
 
 recentered_path = reference_path / 'recentered_images'
 
-num_cpus = len(os.sched_getaffinity(0))
+# Seems to be diminishing returns above 4 threads.
+num_cpus = min(len(os.sched_getaffinity(0)), 4)
 pool = concurrent.futures.ThreadPoolExecutor(num_cpus)
 
 print("Loading and processing reference data")
@@ -139,8 +139,8 @@ stitched_img = skimage.io.imread(stitched_img_path)
 
 print("Segmenting stitched image")
 regions = segment(stitched_img, bg_threshold)
-comp_colonies = list(map_progress(
-    pool, extract_comparison_colony, itertools.repeat(stitched_img), regions
+comp_colonies = list(map(
+    extract_comparison_colony, itertools.repeat(stitched_img), regions
 ))
 
 costs = np.empty((len(comp_colonies), len(ref_colonies)))
@@ -149,7 +149,6 @@ costs = np.array(list(map_progress(
     pool, match_reference_colonies, comp_colonies,
     itertools.repeat(ref_colonies)
 )))
-print()
 
 pool.shutdown()
 
