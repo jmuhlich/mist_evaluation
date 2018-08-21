@@ -52,8 +52,20 @@ class ReferenceColony(object):
 
 @attr.s
 class ComparisonColony(object):
+
     region = attr.ib()
-    img = attr.ib()
+
+    @property
+    def img(self):
+        return self.region.intensity_image
+
+    @property
+    def centroid(self):
+        return self.region.centroid
+
+    @property
+    def local_centroid(self):
+        return self.region.local_centroid
 
 
 def load_ref_img(path):
@@ -80,27 +92,21 @@ def calc_ref_colony_area(img):
     return regions[idx].area
 
 
-def extract_comparison_colony(stitched_img, region):
-    y1, x1, y2, x2 = region.bbox
-    img = stitched_img[y1:y2, x1:x2]
-    colony = ComparisonColony(region, img)
-    return colony
-
-
 def match_reference_colonies(comp_colony, ref_colonies):
-    img_c = comp_colony.img
-    costs = np.empty(len(ref_colonies))
-    costs[:] = -np.inf
+    corr = np.empty(len(ref_colonies))
+    corr[:] = -10000
     for ri, rc in enumerate(ref_colonies):
-        crop_exact = np.subtract(rc.img.shape, img_c.shape) / 2
-        if np.any(crop_exact <= 0):
-            continue
-        crop_before = np.floor(crop_exact)
-        crop_after = np.ceil(crop_exact)
-        crop = np.vstack([crop_before, crop_after]).astype(int).T
-        img_r = skimage.util.crop(rc.img, crop)
-        costs[ri] = ncc(img_c, img_r)
-    return 1 - costs
+        r1 = np.array(rc.img.shape) / 2 - comp_colony.local_centroid
+        r1 = np.floor(r1).astype(int)
+        c1 = -np.minimum(r1, 0)
+        r1 = np.maximum(r1, 0)
+        r2 = np.minimum(r1 + comp_colony.img.shape - c1, rc.img.shape)
+        c2 = c1 + (r2 - r1)
+        img_c = comp_colony.img[c1[0]:c2[0], c1[1]:c2[1]]
+        img_r = rc.img[r1[0]:r2[0], r1[1]:r2[1]]
+        img_r = np.where(img_r > 500, img_r, 0)
+        corr[ri] = ncc(img_c, img_r)
+    return 1 - corr
 
 
 def ncc(i1, i2):
@@ -110,6 +116,30 @@ def ncc(i1, i2):
     i2 /= np.linalg.norm(i2)
     corr = np.dot(i1.reshape(-1), i2.reshape(-1))
     return corr
+
+
+def recover_transformation(P, Q):
+    # Kabsch algorithm.
+    Pc = np.mean(P, axis=0)
+    Qc = np.mean(Q, axis=0)
+    P = P - Pc
+    Q = Q - Qc
+    H = P.T @ Q
+    B, L, Wt = np.linalg.svd(H)
+    R = Wt.T @ B.T
+    T = -R @ Qc + Pc
+    # Extract rotation angle from rotation matrix.
+    # Based on https://math.stackexchange.com/a/78165 .
+    det = np.linalg.det(R)
+    assert det != 0, "Degenerate matrix"
+    (a, b), (c, d) = R
+    scale_y = np.linalg.norm([a, b])
+    scale_x = det / scale_y
+    shear = (a * c + b * d) / det
+    theta = np.arctan2(b, a)
+    assert np.allclose([scale_x, scale_y], 1), "Unexpected scale component"
+    assert np.allclose(shear, 0), "Unexpected shear component"
+    return T, R, theta
 
 
 reference_path, stitched_img_path, bg_threshold = sys.argv[1:]
@@ -134,11 +164,20 @@ stitched_img = skimage.io.imread(stitched_img_path)
 
 print("Segmenting stitched image")
 regions = segment(stitched_img, bg_threshold)
-comp_colonies = list(map(
-    extract_comparison_colony, itertools.repeat(stitched_img), regions
-))
+comp_colonies = [ComparisonColony(r) for r in regions]
 
-costs = np.empty((len(comp_colonies), len(ref_colonies)))
+# Filter reference colonies that are out of bounds in the comparison data.
+ref_colonies = [
+    c for c in ref_colonies
+    if c.centroid[0] < 4440 and c.centroid[1] < -477
+]
+
+# Filter comparison colonies that are out of bounds in the reference data.
+comp_colonies = [
+    c for c in comp_colonies
+    if c.centroid[0] > 100 and c.centroid[1] > 350
+]
+
 print("Matching colony images")
 costs = np.array(list(map_progress(
     pool, match_reference_colonies, comp_colonies,
@@ -148,3 +187,8 @@ costs = np.array(list(map_progress(
 pool.shutdown()
 
 comp_idxs, ref_idxs = scipy.optimize.linear_sum_assignment(costs)
+
+ref_c = np.array([ref_colonies[i].centroid for i in ref_idxs])
+comp_c = np.array([comp_colonies[i].centroid for i in comp_idxs]) * .658
+
+T, R, theta = recover_transformation(ref_c, comp_c)
