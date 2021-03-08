@@ -2,7 +2,7 @@ import sys
 import os
 import re
 import time
-import collections
+import collections.abc
 import itertools
 import pathlib
 import attr
@@ -19,13 +19,13 @@ def segment(I, threshold):
     S = I > threshold
     S = remove_small_objects(S, 2000, connectivity=2)
     S = label(S, connectivity=2).astype(np.uint16)
-    regions = regionprops(dilation(S), I, coordinates='rc')
+    regions = regionprops(dilation(S), I)
     for r in regions:
         if r.min_intensity == 0:
             y1, x1, y2, x2 = r.bbox
             S[y1:y2, x1:x2] = 0
     S = label(S, connectivity=2).astype(np.uint16)
-    regions = regionprops(S, I, coordinates='rc')
+    regions = regionprops(S, I)
     return regions
 
 
@@ -33,7 +33,7 @@ def map_progress(pool, fn, *iterables):
     t_start = time.perf_counter()
     # Assumes all iterables are the same length!
     for it in iterables:
-        if isinstance(it, collections.Sized):
+        if isinstance(it, collections.abc.Sized):
             total = "/" + str(len(it))
             break
     else:
