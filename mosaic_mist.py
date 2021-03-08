@@ -4,7 +4,7 @@ import re
 import numpy as np
 import pandas as pd
 import skimage.io
-import ashlar.reg
+import ashlar.utils
 
 if len(sys.argv) != 4:
     print("Usage: global_positions_file tile_image_dir output_file")
@@ -34,6 +34,6 @@ for rec in df.itertuples():
     print(f"{rec.file:20}  x:{rec.x:6}  y:{rec.y:6}")
     tile = skimage.io.imread(str(tile_image_dir / rec.file))
     mslice = img[rec.y:rec.y+th, rec.x:rec.x+tw]
-    mslice[:] = ashlar.reg.pastefunc_blend(mslice, tile)
+    mslice[:] = ashlar.utils.pastefunc_blend(mslice, tile)
 
 skimage.io.imsave(str(output_file), img, check_contrast=False)
