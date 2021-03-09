@@ -1,85 +1,80 @@
 import sys
 import os
 import re
-import time
 import collections.abc
 import itertools
 import pathlib
-import attr
+import dataclasses
+from typing import Any
 import numpy as np
 import scipy.optimize
+from scipy.ndimage import label
 import skimage
 import skimage.io
-from skimage.morphology import remove_small_objects, dilation
-from skimage.measure import label, regionprops
+from skimage.morphology import dilation
+from skimage.measure import regionprops
 import concurrent.futures
+import tqdm
+
+
+# Structuring element for connectivity=2.
+sc2 = np.ones((3, 3), int)
 
 
 def segment(I, threshold):
-    S = I > threshold
-    S = remove_small_objects(S, 2000, connectivity=2)
-    S = label(S, connectivity=2).astype(np.uint16)
+    S = (I > threshold).astype(np.uint16)
+    label(S, sc2, output=S)
     regions = regionprops(dilation(S), I)
-    for r in regions:
-        if r.min_intensity == 0:
+    # Filter out 1) small objects; 2) those that are at the edge of the original
+    # imaged region (touching a pixel with intensity zero).
+    for i, r in enumerate(regions):
+        if r.area < 2000 or r.min_intensity == 0:
             y1, x1, y2, x2 = r.bbox
             S[y1:y2, x1:x2] = 0
-    S = label(S, connectivity=2).astype(np.uint16)
+    #    regions[i] = None   # avoid skimage memory leak/waste?
+    label(S, sc2, output=S)
     regions = regionprops(S, I)
     return regions
 
 
 def map_progress(pool, fn, *iterables):
-    t_start = time.perf_counter()
     # Assumes all iterables are the same length!
     for it in iterables:
         if isinstance(it, collections.abc.Sized):
-            total = "/" + str(len(it))
+            total = len(it)
             break
     else:
-        total = ""
-    for i, result in enumerate(pool.map(fn, *iterables), 1):
-        print(f"\r    {i}{total}", end="")
+        total = None
+    for result in tqdm.tqdm(pool.map(fn, *iterables), total=total):
         yield result
-    t_end = time.perf_counter()
-    print(f"    Elapsed: {t_end - t_start}")
 
 
-@attr.s
-class ReferenceColony(object):
-    centroid = attr.ib()
-    region = attr.ib()
-    img = attr.ib()
+@dataclasses.dataclass
+class ReferenceColony:
+    centroid : Any
+    img : Any
+    region : dataclasses.InitVar[Any]
+    intensity_image : Any = None
+    area : Any = None
 
-    @property
-    def intensity_image(self):
-        return self.region.intensity_image
-
-    @property
-    def area(self):
-        return self.region.area
+    def __post_init__(self, region):
+        self.intensity_image = region.intensity_image
+        self.area = region.area
 
 
-@attr.s
-class ComparisonColony(object):
+@dataclasses.dataclass
+class ComparisonColony:
+    region : dataclasses.InitVar[Any]
+    intensity_image : Any = None
+    area : Any = None
+    centroid : Any = None
+    local_centroid : Any = None
 
-    region = attr.ib()
-
-    @property
-    def intensity_image(self):
-        return self.region.intensity_image
-
-    @property
-    def area(self):
-        return self.region.area
-
-    @property
-    def centroid(self):
-        return self.region.centroid
-
-    @property
-    def local_centroid(self):
-        return self.region.local_centroid
+    def __post_init__(self, region):
+        self.intensity_image = region.intensity_image
+        self.area = region.area
+        self.centroid = region.centroid
+        self.local_centroid = region.local_centroid
 
 
 def load_ref_img(path):
@@ -93,7 +88,7 @@ def load_ref_img(path):
     assert img_path.exists(), f"Missing image file: {img_name}"
     img = skimage.io.imread(img_path, plugin="tifffile")
     region = extract_ref_colony_region(img)
-    colony = ReferenceColony(centroid, region, img)
+    colony = ReferenceColony(centroid=centroid, img=img, region=region)
     return colony
 
 
@@ -222,7 +217,7 @@ stitched_img[-1, :] = 0
 print("Segmenting stitched image")
 regions = segment(stitched_img, bg_threshold)
 comp_colonies = [
-    ComparisonColony(r) for r in regions
+    ComparisonColony(region=r) for r in regions
     if np.diff(r.bbox[0::2]) < 1040 and np.diff(r.bbox[1::2]) < 1392
 ]
 
