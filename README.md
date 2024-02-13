@@ -1,0 +1,1 @@
+Python port of stitching accuracy evaluation used in Chalfoun et al. Accurate and Scalable Microscopy Image Stitching Tool with Stage Modeling and Error Minimization. https://doi.org/10.1038/s41598-017-04567-y
